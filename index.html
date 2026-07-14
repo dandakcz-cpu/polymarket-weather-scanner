@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Polymarket Weather Scanner</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">LIVE POLYMARKET DATA</p>
+        <h1>Weather Scanner</h1>
+        <p>Aktivní trhy s nejvyšší denní teplotou. Ceny se načítají z veřejného Gamma a CLOB API.</p>
+      </div>
+      <button id="refresh">Aktualizovat</button>
+    </header>
+
+    <section class="filters">
+      <label>
+        Město
+        <input id="city" placeholder="např. Tokyo">
+      </label>
+      <label>
+        Datum
+        <input id="date" type="date">
+      </label>
+      <label class="checkbox">
+        <input id="books" type="checkbox" checked>
+        Načíst order book
+      </label>
+    </section>
+
+    <section class="status">
+      <span id="status">Načítám…</span>
+      <span id="updated"></span>
+    </section>
+
+    <section class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Město</th>
+            <th>Datum</th>
+            <th>Teplota</th>
+            <th>Bid YES</th>
+            <th>Ask YES</th>
+            <th>Střed</th>
+            <th>Spread</th>
+            <th>24h objem</th>
+            <th>Trh</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+  </main>
+
+<script>
+const rowsEl = document.getElementById("rows");
+const statusEl = document.getElementById("status");
+const updatedEl = document.getElementById("updated");
+
+const pct = value => value == null ? "—" : `${(value * 100).toFixed(1)} %`;
+const usd = value => value == null ? "—" : new Intl.NumberFormat("en-US", {
+  style: "currency", currency: "USD", maximumFractionDigits: 0
+}).format(value);
+
+function temp(row) {
+  const op = row.comparator === ">=" ? "≥ " : row.comparator === "<=" ? "≤ " : "";
+  return `${op}${Number(row.temperature_c).toLocaleString("cs-CZ")} °C`;
+}
+
+async function load() {
+  statusEl.textContent = "Načítám živá data…";
+  rowsEl.innerHTML = "";
+  const params = new URLSearchParams();
+  const city = document.getElementById("city").value.trim();
+  const date = document.getElementById("date").value;
+  const books = document.getElementById("books").checked;
+  if (city) params.set("city", city);
+  if (date) params.set("date", date);
+  params.set("include_books", books ? "true" : "false");
+
+  try {
+    const response = await fetch(`/api/weather-markets?${params.toString()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+
+    for (const row of data.markets) {
+      const midpoint = row.best_bid != null && row.best_ask != null
+        ? (row.best_bid + row.best_ask) / 2
+        : row.last_trade_price ?? row.gamma_yes_price;
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><strong>${row.city}</strong></td>
+        <td>${row.date}</td>
+        <td>${temp(row)}</td>
+        <td>${pct(row.best_bid)}</td>
+        <td>${pct(row.best_ask)}</td>
+        <td><strong>${pct(midpoint)}</strong></td>
+        <td>${pct(row.spread)}</td>
+        <td>${usd(row.volume_24h)}</td>
+        <td>${row.market_url ? `<a href="${row.market_url}" target="_blank" rel="noreferrer">Otevřít</a>` : "—"}</td>
+      `;
+      rowsEl.appendChild(tr);
+    }
+
+    statusEl.textContent = `${data.count} nalezených trhů`;
+    updatedEl.textContent = `Aktualizováno ${new Date(data.updated_at_unix * 1000).toLocaleTimeString("cs-CZ")}`;
+  } catch (error) {
+    statusEl.textContent = `Chyba: ${error.message}`;
+  }
+}
+
+document.getElementById("refresh").addEventListener("click", load);
+document.getElementById("city").addEventListener("input", () => {
+  clearTimeout(window.cityTimer);
+  window.cityTimer = setTimeout(load, 350);
+});
+document.getElementById("date").addEventListener("change", load);
+document.getElementById("books").addEventListener("change", load);
+load();
+</script>
+</body>
+</html>
